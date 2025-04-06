@@ -1,10 +1,4 @@
-# azure-master
 
-Okay, let's build out Section 1: Design Identity, Governance, and Monitoring Solutions for the Azure Solutions Architect Expert (AZ-305) Visual Reference guide in full detail, including explanations, diagrams using Mermaid.js syntax, and comparison tables.
-
----
-
-**(Start of Section 1)**
 
 # **Section 1: Design Identity, Governance, and Monitoring Solutions**
 
@@ -939,3 +933,936 @@ graph TD
 
 ---
 **(End of Section 1)**
+
+Okay, let's proceed with Section 2: Design Data Storage Solutions, ensuring full detail and avoiding parentheses `(` and `)` in the Mermaid.js code.
+
+---
+
+**(Start of Section 2)**
+
+# **Section 2: Design Data Storage Solutions**
+
+Choosing the right data storage solution in Azure is fundamental to building performant, scalable, cost-effective, and reliable applications. Azure offers a wide array of storage services, each optimized for different data types, access patterns, consistency requirements, and performance needs. This section delves into designing solutions for non-relational data (like objects, files, NoSQL), relational data (SQL databases), and the integration services needed to move and transform data between them. Key considerations include data structure, latency, throughput, IOPS, consistency models, high availability, disaster recovery, security, and cost.
+
+---
+
+## **2.1 Design Non-Relational Data Storage**
+
+Non-relational storage encompasses a broad category of data that doesn't fit neatly into traditional row-and-column database structures. This includes object storage for unstructured data, file shares, NoSQL databases (key-value, document, graph, column-family), and caching solutions.
+
+### **2.1.1 Azure Storage Accounts**
+
+The Azure Storage account is a foundational service providing a unique namespace in Azure for your data. It acts as a container for various storage services like Blobs, Files, Queues, Tables, and Disks (though Managed Disks are typically managed separately now).
+
+*   **Account Types:**
+    *   **Standard General-purpose v2:** Most common type, supports Blob (Block, Append, Page), File, Queue, Table storage. Supports all redundancy options and access tiers. Pay-as-you-go pricing.
+    *   **Premium Block Blobs:** Optimized for high transaction rates and low-latency access using SSDs. Ideal for interactive workloads, big data analytics requiring fast access. Supports LRS and ZRS. Higher cost than Standard.
+    *   **Premium FileShares:** Optimized for high-performance file shares using SSDs. Supports SMB and NFS protocols. Ideal for enterprise applications, HPC, databases requiring file shares. Supports LRS and ZRS. Higher cost.
+    *   **Premium Page Blobs:** Optimized for high-performance random read/write operations (Page Blobs only). Primarily used as the underlying storage for Azure VM disks (though Managed Disks abstract this). Supports LRS only.
+
+*   **Redundancy Options:** Determines how data is replicated for durability and availability.
+    *   **Locally-redundant storage (LRS):** Three synchronous copies within a single physical location (datacenter rack) in the primary region. Lowest cost, protects against rack failure. Vulnerable to DC-level disaster.
+    *   **Zone-redundant storage (ZRS):** Three synchronous copies across three different Availability Zones within the primary region. Protects against DC failure. Higher cost than LRS. Not available in all regions or for all account types/blob tiers.
+    *   **Geo-redundant storage (GRS):** Copies data synchronously three times within the primary region (LRS) and then copies data asynchronously to a secondary region hundreds of miles away (three more copies via LRS in the secondary). Protects against regional disaster.
+    *   **Read-access geo-redundant storage (RA-GRS):** Same as GRS, but provides read-only access to the data in the secondary region. Useful for DR read scenarios or geographic load balancing for reads. Higher cost than GRS.
+    *   **Geo-zone-redundant storage (GZRS):** Copies data synchronously across three Availability Zones in the primary region (ZRS) and then copies data asynchronously to a secondary region (LRS). Combines ZRS protection with geo-replication.
+    *   **Read-access geo-zone-redundant storage (RA-GZRS):** Same as GZRS, but provides read-only access to the data in the secondary region. Highest durability and availability option. Highest cost.
+
+*   **Networking:**
+    *   **Public Endpoints:** Accessible over the internet (default). Access secured via keys, SAS, RBAC, firewall.
+    *   **Firewall and Virtual Networks:** Restrict access to specific public IP ranges or Azure Virtual Network subnets (using Service Endpoints or Private Endpoints).
+    *   **Service Endpoints:** Provides secure and direct connectivity to storage from specified VNet subnets over the Azure backbone, using the storage account's public endpoint but routing traffic privately. The source IP seen by storage is the VNet private IP.
+    *   **Private Endpoints:** Provisions a Network Interface (NIC) within your VNet with a private IP address that maps to the storage account service. All traffic stays within your VNet and the Azure backbone, disabling the public endpoint by default. Preferred method for maximum network isolation. Requires Private DNS Zone integration for name resolution.
+
+*   **Security:**
+    *   **Authentication:** Access Keys (Full account access - use cautiously), Shared Access Signatures (SAS - Delegated, granular, time-limited access), Microsoft Entra ID integration (for Blob and File RBAC), Anonymous access (for public Blobs).
+    *   **Authorization:** Azure RBAC roles (e.g., Storage Blob Data Contributor, Storage File Data SMB Share Contributor) for Entra ID principals. Stored Access Policies (for defining SAS constraints server-side).
+    *   **Encryption:** Storage Service Encryption (SSE) encrypts data at rest automatically (default). Uses Platform-Managed Keys (PMK) or Customer-Managed Keys (CMK) stored in Azure Key Vault. Customer-provided keys (SSE-C) option for Blobs. Infrastructure encryption (optional double encryption). Encryption in transit via HTTPS (default). SMB 3.0 encryption for Azure Files.
+
+**Diagram 2.1.1.A: Storage Account Redundancy Options Visual**
+```mermaid
+graph TD
+    subgraph LRS [Locally Redundant Storage]
+        direction LR
+        DC1_Rack1{Datacenter Rack 1}
+        Copy1_LRS[Copy 1]
+        Copy2_LRS[Copy 2]
+        Copy3_LRS[Copy 3]
+        DC1_Rack1 -- Contains --> Copy1_LRS & Copy2_LRS & Copy3_LRS;
+    end
+
+    subgraph ZRS [Zone Redundant Storage]
+        direction LR
+        AZ1{Availability Zone 1} -- Contains --> Copy1_ZRS[Copy 1];
+        AZ2{Availability Zone 2} -- Contains --> Copy2_ZRS[Copy 2];
+        AZ3{Availability Zone 3} -- Contains --> Copy3_ZRS[Copy 3];
+    end
+
+    subgraph GRS [Geo Redundant Storage]
+        direction TB
+        PrimaryRegion_GRS{Primary Region}
+        SecondaryRegion_GRS{Secondary Region}
+        PrimaryRegion_GRS -- Async Replication --> SecondaryRegion_GRS;
+        subgraph Primary_GRS [Primary - LRS]
+            direction LR
+            P_Copy1_GRS[Copy 1]
+            P_Copy2_GRS[Copy 2]
+            P_Copy3_GRS[Copy 3]
+        end
+        subgraph Secondary_GRS [Secondary - LRS]
+            direction LR
+            S_Copy1_GRS[Copy 1]
+            S_Copy2_GRS[Copy 2]
+            S_Copy3_GRS[Copy 3]
+        end
+        PrimaryRegion_GRS --> Primary_GRS;
+        SecondaryRegion_GRS --> Secondary_GRS;
+    end
+
+    subgraph GZRS [Geo-Zone Redundant Storage]
+        direction TB
+        PrimaryRegion_GZRS{Primary Region}
+        SecondaryRegion_GZRS{Secondary Region}
+        PrimaryRegion_GZRS -- Async Replication --> SecondaryRegion_GZRS;
+        subgraph Primary_GZRS [Primary - ZRS]
+            direction LR
+            PZ1{AZ 1} --> PZ_Copy1[Copy 1];
+            PZ2{AZ 2} --> PZ_Copy2[Copy 2];
+            PZ3{AZ 3} --> PZ_Copy3[Copy 3];
+        end
+         subgraph Secondary_GZRS [Secondary - LRS]
+            direction LR
+            SZ_Copy1_GZRS[Copy 1]
+            SZ_Copy2_GZRS[Copy 2]
+            SZ_Copy3_GZRS[Copy 3]
+        end
+        PrimaryRegion_GZRS --> Primary_GZRS;
+        SecondaryRegion_GZRS --> Secondary_GZRS;
+    end
+
+    style LRS fill:#AED6F1, stroke:#3498DB
+    style ZRS fill:#A9DFBF, stroke:#2ECC71
+    style GRS fill:#FAD7A0, stroke:#F39C12
+    style GZRS fill:#D2B4DE, stroke:#8E44AD
+```
+
+**Decision Tree 2.1.1.B: Choosing Storage Account Redundancy**
+```mermaid
+graph TD
+    Start{Need Storage Account} --> Q_HA{High Availability Need within Region?};
+    Q_HA -- Yes --> Q_ZoneFail{Protect against Datacenter/Zone Failure?};
+    Q_HA -- No --> LRS[Choose LRS - Lowest Cost];
+
+    Q_ZoneFail -- Yes --> ZRS_Check{Is ZRS Available/Supported?};
+    Q_ZoneFail -- No --> LRS;
+
+    ZRS_Check -- Yes --> ZRS_Base[Base: ZRS];
+    ZRS_Check -- No --> LRS_Base[Base: LRS];
+
+    ZRS_Base --> Q_DR_ZRS{Need Disaster Recovery - Geo-Replication?};
+    LRS_Base --> Q_DR_LRS{Need Disaster Recovery - Geo-Replication?};
+
+    Q_DR_ZRS -- No --> ZRS_Final[Choose ZRS];
+    Q_DR_LRS -- No --> LRS_Final[Choose LRS];
+
+    Q_DR_ZRS -- Yes --> Q_Read_GZRS{Need Read Access in Secondary Region?};
+    Q_DR_LRS -- Yes --> Q_Read_GRS{Need Read Access in Secondary Region?};
+
+    Q_Read_GZRS -- Yes --> RAGZRS[Choose RA-GZRS];
+    Q_Read_GZRS -- No --> GZRS[Choose GZRS];
+
+    Q_Read_GRS -- Yes --> RAGRS[Choose RA-GRS];
+    Q_Read_GRS -- No --> GRS[Choose GRS];
+
+    style Start fill:#FF9800,color:#FFF
+    style LRS fill:#AED6F1, stroke:#3498DB
+    style ZRS_Final fill:#A9DFBF, stroke:#2ECC71
+    style GRS fill:#FAD7A0, stroke:#F39C12
+    style RAGRS fill:#FAD7A0, stroke:#F39C12
+    style GZRS fill:#D2B4DE, stroke:#8E44AD
+    style RAGZRS fill:#D2B4DE, stroke:#8E44AD
+```
+
+**Comparison Table 2.1.1.C: Access Keys vs. SAS vs. RBAC vs. Managed Identity for Storage AuthN/AuthZ**
+
+| Method          | Authentication          | Authorization Scope | Granularity        | Credential Mgmt | Use Case                                      |
+| :-------------- | :---------------------- | :------------------ | :----------------- | :-------------- | :-------------------------------------------- |
+| **Access Keys** | Shared Key (Account)    | Full Account        | All Services/Data  | Required (Rotate!) | Service-to-service (legacy), Admin tools      |
+| **SAS Token**   | Shared Key or User Del. | Account or Service  | Specific Permissions, Expiry, IP | Generated Token | Delegated access (client uploads), Temp access |
+| **Azure RBAC**  | Microsoft Entra ID Token | Container/Blob/File | Predefined Roles   | Entra ID Users/Groups | User/Group/App access to data plane           |
+| **Managed ID**  | Microsoft Entra ID Token | Container/Blob/File | Predefined Roles   | None (Azure Managed) | Azure Service-to-Service (VM/Func -> Storage) |
+
+### **2.1.2 Azure Blob Storage**
+
+Blob (Binary Large Object) storage is optimized for storing massive amounts of unstructured data, such as text or binary data.
+
+*   **Blob Types:**
+    *   **Block Blobs:** Composed of blocks (up to 100MB each, max size ~4.75TB or ~190.7 TiB for large blobs). Ideal for streaming, storing documents, images, videos, backups. Uploads can be parallelized.
+    *   **Append Blobs:** Similar to block blobs but optimized for append operations. Ideal for logging scenarios where data is continuously added to the end of the blob. Max size same as Block Blobs.
+    *   **Page Blobs:** Collection of 512-byte pages optimized for frequent random read/write operations. Max size 8TB. Used as the underlying storage for Azure IaaS disks (Managed Disks are recommended abstraction).
+
+*   **Access Tiers:** Optimize cost based on access frequency. Applicable primarily to Block Blobs.
+    *   **Hot:** Highest storage cost, lowest access cost. For frequently accessed data. Default tier.
+    *   **Cool:** Lower storage cost, higher access cost (per-GB retrieval fee). For infrequently accessed data stored for at least 30 days.
+    *   **Cold:** Even lower storage cost, higher access cost than Cool. For rarely accessed data stored for at least 90 days. New tier (preview in some regions).
+    *   **Archive:** Lowest storage cost, highest access cost (retrieval fee + latency). For rarely accessed data stored for at least 180 days. Data is offline; retrieval (rehydration) can take hours.
+
+*   **Lifecycle Management Policies:** Automate tiering and deletion. Rules based on blob age (last modified, created, last accessed), prefix match, index tags. Actions: TierToCool, TierToCold, TierToArchive, DeleteBlob, DeleteSnapshot.
+
+*   **Features:**
+    *   **Versioning:** Automatically maintains previous versions of a blob when overwritten or deleted. Protects against accidental modification/deletion.
+    *   **Soft Delete:** Retains deleted blobs/versions for a configurable period, allowing recovery.
+    *   **Immutability Policies (WORM - Write Once, Read Many):** Time-based or Legal Hold policies to make blob data non-erasable and non-modifiable for a specified interval. Used for compliance.
+    *   **Change Feed:** Ordered log of changes (creation, modification, deletion) to blobs. Useful for processing data changes.
+    *   **Static Website Hosting:** Serve static content (HTML, CSS, JS) directly from a special `$web` container.
+    *   **Blob Index Tags:** Key-value tags applied to blobs, automatically indexed for faster filtering via `Find Blobs by Tags` API (used by Lifecycle Management, other apps).
+
+**Diagram 2.1.2.A: Blob Access Tiers & Lifecycle Flow Visual**
+```mermaid
+graph TD
+    Upload --> HotTier[Hot Access Tier <br/> fa:fa-fire Frequent Access <br/> High Storage Cost <br/> Low Access Cost];
+
+    subgraph Lifecycle Management Rule
+        direction TB
+        Condition1{Age > 30 days?} -- Yes --> ActionTierCool[Tier to Cool];
+        Condition2{Age > 90 days?} -- Yes --> ActionTierCold[Tier to Cold];
+        Condition3{Age > 180 days?} -- Yes --> ActionTierArchive[Tier to Archive];
+        Condition4{Age > 365 days?} -- Yes --> ActionDelete[Delete Blob];
+    end
+
+    HotTier -- Apply Rule --> Condition1;
+    HotTier -- Apply Rule --> Condition2;
+    HotTier -- Apply Rule --> Condition3;
+    HotTier -- Apply Rule --> Condition4;
+
+    ActionTierCool --> CoolTier[Cool Access Tier <br/> fa:fa-snowflake Infrequent Access <br/> Lower Storage Cost <br/> Higher Access Cost];
+    ActionTierCold --> ColdTier[Cold Access Tier <br/> fa:fa-thermometer-empty Rare Access <br/> Lower Storage Cost <br/> Higher Access Cost];
+    ActionTierArchive --> ArchiveTier[Archive Access Tier <br/> fa:fa-archive Very Rare Access <br/> Lowest Storage Cost <br/> Highest Access Cost <br/> Offline - Hours to Rehydrate];
+
+    CoolTier -- Apply Rule --> Condition2;
+    CoolTier -- Apply Rule --> Condition3;
+    CoolTier -- Apply Rule --> Condition4;
+
+    ColdTier -- Apply Rule --> Condition3;
+    ColdTier -- Apply Rule --> Condition4;
+
+    ArchiveTier -- Apply Rule --> Condition4;
+
+    ActionDelete --> Deleted[fa:fa-trash Blob Deleted];
+
+    style HotTier fill:#E74C3C,color:#FFF
+    style CoolTier fill:#5DADE2,color:#FFF
+    style ColdTier fill:#AED6F1,color:#000
+    style ArchiveTier fill:#839192,color:#FFF
+    style Deleted fill:#000,color:#FFF
+```
+
+**Comparison Table 2.1.2.B: Blob Storage Tiers Comparison**
+
+| Feature             | Hot Tier                 | Cool Tier                 | Cold Tier                 | Archive Tier              |
+| :------------------ | :----------------------- | :------------------------ | :------------------------ | :------------------------ |
+| **Intended Use**    | Frequently accessed data | Infrequently accessed data| Rarely accessed data      | Long-term archive, backup |
+| **Min Duration**    | None                     | 30 days                   | 90 days                   | 180 days                  |
+| **Availability SLA**| Highest                  | High (Slightly lower)     | High (Slightly lower)     | N/A (Offline)             |
+| **Retrieval Latency**| Milliseconds             | Milliseconds              | Milliseconds              | Hours (Rehydration)       |
+| **Storage Cost**    | Highest                  | Lower                     | Lower                     | Lowest                    |
+| **Access/Txn Cost** | Lowest                   | Higher                    | Higher                    | Highest                   |
+| **Retrieval Fee**   | No                       | Yes (Per GB)              | Yes (Per GB)              | Yes (Per GB)              |
+
+### **2.1.3 Azure Files**
+
+Azure Files offers fully managed file shares in the cloud, accessible via the standard Server Message Block (SMB) and Network File System (NFS) protocols.
+
+*   **Protocols:**
+    *   **SMB:** Versions 2.1, 3.0, 3.1.1. Standard for Windows file sharing, also supported by Linux/macOS.
+    *   **NFS:** Version 4.1. Standard for Linux/UNIX file sharing. (Available on Premium tier FileStorage accounts only).
+
+*   **Tiers:**
+    *   **Premium (FileStorage Account Type):** Uses SSDs for high performance, low latency. Billed based on provisioned share size. Supports SMB and NFS.
+    *   **Standard (General Purpose v2 Account Type):** Uses HDDs. Billed based on usage (storage used + transactions + snapshots). Supports SMB only. Within Standard, performance tiers exist: Transaction Optimized (default), Hot, Cool.
+
+*   **Features:**
+    *   **Snapshots:** Point-in-time, read-only copies of your file share. Useful for backups or recovering from accidental changes.
+    *   **Soft Delete:** Protects shares from accidental deletion for a configurable period.
+    *   **Azure File Sync:** Service to synchronize on-premises Windows Server file shares with Azure Files. Provides cloud tiering (cache hot files locally, tier cool files to Azure) and multi-site sync capabilities. Components: Storage Sync Service (Azure resource), Server Endpoint (Registered server path), Cloud Endpoint (Azure file share).
+
+*   **Authentication & Authorization:**
+    *   **Mounting:** Typically uses the Storage Account Key for direct mounting (less secure).
+    *   **Identity-based Auth (SMB):**
+        *   On-premises Active Directory Domain Services (AD DS) Integration: Join storage account to your AD DS domain. Users authenticate via Kerberos/NTLM. Requires line-of-sight to DCs.
+        *   Microsoft Entra Kerberos (Preview): Authenticate hybrid identities synced to Entra ID using Kerberos. Simpler than AD DS integration for cloud/hybrid scenarios.
+        *   Microsoft Entra Domain Services: Join storage account to managed AD DS domain in Azure.
+    *   **Share-level permissions:** Assign RBAC roles (e.g., Storage File Data SMB Share Reader/Contributor/Elevated Contributor) for identity-based access.
+    *   **NTFS ACLs:** Standard Windows ACLs are preserved and enforced for identity-based authentication. Can be configured via Windows File Explorer after mounting.
+    *   **SAS Tokens:** Can be used for delegated access.
+
+**Diagram 2.1.3.A: Azure File Sync Architecture Visual**
+```mermaid
+graph TD
+    subgraph OnPremises [On-Premises / Other Cloud]
+        WinServer[fa:fa-server Windows Server] --> SyncAgent{Azure File Sync Agent};
+        LocalShare[/path/to/share] --> SyncAgent;
+        SyncAgent -- Registers --> ServerEndpoint[Server Endpoint];
+    end
+
+    subgraph Azure
+        direction LR
+        StorageSyncSvc[fa:fa-cloud Storage Sync Service]
+        CloudEndpoint[Cloud Endpoint] --> AzFileShare[fa:fa-folder Azure File Share];
+        StorageSyncSvc -- Contains --> CloudEndpoint;
+        StorageSyncSvc -- Manages Sync --> ServerEndpoint;
+    end
+
+    ServerEndpoint -- Syncs With --> CloudEndpoint;
+
+    style OnPremises fill:#AED6F1, stroke:#3498DB
+    style Azure fill:#A9DFBF, stroke:#2ECC71
+    style StorageSyncSvc fill:#8E44AD,color:#FFF
+    style AzFileShare fill:#F39C12,color:#FFF
+```
+
+**Comparison Table 2.1.3.B: Azure Files Tiers Comparison [Standard vs. Premium]**
+
+| Feature         | Standard Tier [GPv2 Account] | Premium Tier [FileStorage Account] |
+| :-------------- | :--------------------------- | :--------------------------------- |
+| **Storage Media**| HDD                          | SSD                                |
+| **Performance** | Moderate IOPS/Throughput     | High IOPS/Throughput, Low Latency  |
+| **Protocols**   | SMB only                     | SMB & NFSv4.1                      |
+| **Billing Model**| Pay-as-you-go [Usage + Txns] | Provisioned Capacity               |
+| **Performance Tiers**| Transaction Optimized, Hot, Cool | N/A                              |
+| **Use Case**    | General purpose file shares, Dev/Test, Backups | Enterprise apps, Databases, HPC, Container profiles |
+
+### **2.1.4 Azure Table Storage**
+
+Azure Table storage stores large amounts of structured NoSQL data. It's a key/attribute store with a schemaless design.
+
+*   **Structure:**
+    *   **Account:** The storage account.
+    *   **Table:** A collection of entities.
+    *   **Entity:** A set of properties, similar to a row. Max size 1MB.
+    *   **Properties:** Key-value pairs. Up to 252 custom properties per entity + 3 system properties (PartitionKey, RowKey, Timestamp).
+    *   **PartitionKey & RowKey:** Together form the unique primary key for an entity. PartitionKey determines entity locality for load balancing and scalability. RowKey is unique within a partition. Queries are fastest when targeting a specific PartitionKey and RowKey. Queries scanning multiple partitions are less efficient.
+
+*   **Use Cases:** Storing user data for web apps, address books, device information, service metadata. Scenarios requiring massive scale for simple structured data where relationships are not complex and fast key-based lookup is needed. Often considered a lower-cost, simpler alternative to Cosmos DB Table API for less demanding workloads.
+*   **Scalability Targets:** High scale limits per storage account.
+
+### **2.1.5 Azure Queue Storage**
+
+Azure Queue storage provides simple, reliable, persistent messaging for decoupling application components and building asynchronous workflows.
+
+*   **Features:**
+    *   **Queue:** Contains messages.
+    *   **Message:** Up to 64KB in size (typically text, can be binary). Can persist for up to 7 days by default (configurable).
+    *   **Simple API:** Add messages (Enqueue), Peek messages, Get messages (Dequeue - makes message invisible), Delete messages, Update messages.
+    *   **Reliability:** At-least-once delivery guarantee. Messages become invisible during processing (Visibility Timeout); if not deleted within timeout, they reappear for another consumer.
+    *   **Scalability:** High scale limits per storage account.
+
+*   **Use Cases:** Decoupling web roles from worker roles, scheduling asynchronous tasks, passing messages between application components. Often compared to Azure Service Bus Queues, which offer more advanced features (larger messages, ordering, sessions, dead-lettering, transactions) but at a higher cost and complexity.
+
+### **2.1.6 Azure Cosmos DB**
+
+Azure Cosmos DB is a globally distributed, multi-model database service designed for high availability, low latency, and scalable throughput.
+
+*   **APIs (Multi-Model):** Provides wire-protocol compatibility with several NoSQL database types:
+    *   **Core (SQL) API:** Document database with SQL querying capabilities (most common).
+    *   **MongoDB API:** Document database compatible with MongoDB drivers/tools.
+    *   **Cassandra API:** Column-family database compatible with Cassandra Query Language (CQL).
+    *   **Gremlin API:** Graph database compatible with Apache TinkerPop Gremlin query language.
+    *   **Table API:** Key-value store compatible with Azure Table Storage API (provides premium features like global distribution, dedicated throughput, better indexing, lower latency).
+
+*   **Key Concepts:**
+    *   **Database:** A management unit for containers.
+    *   **Container:** Where data (items, documents, nodes/edges, rows) is stored. Analagous to a table/collection. Throughput and storage are provisioned/billed at the container level (or shared across containers in a database).
+    *   **Items:** Individual records within a container.
+    *   **Request Units (RUs):** Abstract unit representing the cost (CPU, IOPS, memory) of database operations. Throughput is provisioned in RU/s.
+    *   **Partitioning:** Data within a container is horizontally partitioned based on a **Partition Key** property chosen from your items. Critical for scalability and distributing throughput. Logical partitions (items with same key) are mapped to physical partitions (underlying infrastructure). Choose a high-cardinality partition key that evenly distributes requests.
+    *   **Consistency Levels:** Trade-off between read consistency, availability, latency, and throughput.
+        *   **Strong:** Linearizability. Reads guaranteed to return the most recent committed write globally. Highest consistency, lowest availability/performance.
+        *   **Bounded Staleness:** Reads lag behind writes by a configurable amount (k versions or t interval). Guarantees read-your-own-writes within a session. Good balance.
+        *   **Session:** Default level. Strong consistency within a client session (read-your-own-writes). Reads outside the session might lag. Most widely used.
+        *   **Consistent Prefix:** Reads never see out-of-order writes.
+        *   **Eventual:** Weakest consistency. Reads might see older data, no order guarantee. Highest availability/performance.
+
+*   **Features:**
+    *   **Global Distribution:** Replicate data across multiple Azure regions. Configure manual or automatic failover. Supports multi-region writes (multi-master). Provides low-latency access globally.
+    *   **Throughput Provisioning:** Manual RU/s or Autoscale (scales RU/s based on usage within a configured range). Serverless option (pay per operation RU consumption).
+    *   **Change Feed:** Ordered log of changes to items within a container. Used for event sourcing, data movement, downstream processing.
+    *   **Indexing:** Automatic indexing of all properties by default (can be customized). Consistent regardless of consistency level.
+    *   **Security:** RBAC for control plane, Keys or RBAC (via Entra ID) for data plane access, Private Endpoints, IP Firewall.
+    *   **Backup:** Automatic periodic backups. Point-in-time restore option (additional cost).
+
+**Diagram 2.1.6.A: Cosmos DB Global Distribution & Consistency Visual**
+```mermaid
+graph TD
+    UserWest[User - West US]
+    UserEast[User - East US]
+    UserEurope[User - West Europe]
+
+    subgraph CosmosDB [Azure Cosmos DB - Globally Distributed]
+        direction LR
+        RegionWest{Region: West US <br/> Write/Read Replica}
+        RegionEast{Region: East US <br/> Read Replica}
+        RegionEurope{Region: West Europe <br/> Read Replica}
+
+        RegionWest -- Replication --> RegionEast;
+        RegionWest -- Replication --> RegionEurope;
+        RegionEast -- Replication --> RegionWest; %% Example for Multi-Master
+        RegionEurope -- Replication --> RegionWest; %% Example for Multi-Master
+    end
+
+    UserWest -- Low Latency --> RegionWest;
+    UserEast -- Low Latency --> RegionEast;
+    UserEurope -- Low Latency --> RegionEurope;
+
+    ConsistencyNote((Consistency Level Choice <br/> Impacts Read Latency & Data Staleness <br/> e.g., Strong vs Eventual));
+
+    style CosmosDB fill:#0078D4,stroke:#FFF,stroke-width:2px,color:#FFF
+    style RegionWest fill:#A9DFBF, stroke:#2ECC71
+    style RegionEast fill:#AED6F1, stroke:#3498DB
+    style RegionEurope fill:#FAD7A0, stroke:#F39C12
+    style ConsistencyNote fill:#E74C3C, color:#FFF
+```
+
+**Diagram 2.1.6.B: Cosmos DB Partitioning Visual**
+```mermaid
+graph TD
+    Container[Container: UserProfiles] --> LogicalPartitions{Logical Partitions [Grouped by Partition Key]};
+
+    subgraph LogicalPartitions
+        direction LR
+        LP_City1[Partition Key: "Seattle"] --> Item1_1[Item: User A, City: Seattle];
+        LP_City1 --> Item1_2[Item: User B, City: Seattle];
+        LP_City2[Partition Key: "London"] --> Item2_1[Item: User C, City: London];
+        LP_City3[Partition Key: "Tokyo"] --> Item3_1[Item: User D, City: Tokyo];
+        LP_City3 --> Item3_2[Item: User E, City: Tokyo];
+    end
+
+    LogicalPartitions -- Mapped To --> PhysicalPartitions{Physical Partitions [Underlying Infrastructure]};
+
+    subgraph PhysicalPartitions
+        direction LR
+        PP1[Physical Partition 1]
+        PP2[Physical Partition 2]
+        %% Mapping depends on hash of Partition Key
+        LP_City1 --> PP1;
+        LP_City2 --> PP2;
+        LP_City3 --> PP1; %% Example mapping
+    end
+
+    Request[Query for User C where City='London'] --> LP_City2; %% Efficient - Targets single partition
+    Request2[Query for all Users] --> PP1 & PP2; %% Inefficient - Cross-partition query
+
+    style Container fill:#8E44AD,color:#FFF
+    style LogicalPartitions fill:#3498DB,color:#FFF
+    style PhysicalPartitions fill:#1ABC9C,color:#FFF
+```
+
+**Comparison Table 2.1.6.C: Cosmos DB Consistency Levels Comparison**
+
+| Consistency Level  | Read Consistency Guarantee | Latency | Throughput | Availability | Use Case Example                               |
+| :----------------- | :------------------------- | :------ | :--------- | :----------- | :--------------------------------------------- |
+| **Strong**         | Linearizable (Latest Data) | Highest | Lowest     | Lowest       | Stock trading, Financial ledgers               |
+| **Bounded Staleness**| Lag by K versions or T time| High    | Low        | High         | Real-time feeds needing near-latest data       |
+| **Session**        | Read-Your-Own-Writes (in session) | Low     | High       | High         | User profiles, Shopping carts (Default)        |
+| **Consistent Prefix**| Reads see ordered writes   | Low     | High       | High         | Scenarios needing order but tolerating some lag |
+| **Eventual**       | No order guarantee         | Lowest  | Highest    | Highest      | Like counts, Non-critical counters, Recommendations |
+
+**Decision Tree 2.1.6.D: Choosing a Cosmos DB API**
+```mermaid
+graph TD
+    Start{Need NoSQL DB} --> Q_API{Existing Application or Data Model?};
+
+    Q_API -- MongoDB App --> API_Mongo[Choose MongoDB API];
+    Q_API -- Cassandra App --> API_Cassandra[Choose Cassandra API];
+    Q_API -- Gremlin/Graph App --> API_Gremlin[Choose Gremlin API];
+    Q_API -- Azure Table Storage App --> API_Table[Choose Table API];
+    Q_API -- New App / Document Model --> API_SQL[Choose Core SQL API - Most Features];
+    Q_API -- Key/Value Needs --> API_Table_Or_SQL[Consider Table API or Core SQL API];
+
+    style Start fill:#FF9800,color:#FFF
+    style API_Mongo fill:#4CAF50,color:#FFF
+    style API_Cassandra fill:#4CAF50,color:#FFF
+    style API_Gremlin fill:#4CAF50,color:#FFF
+    style API_Table fill:#4CAF50,color:#FFF
+    style API_SQL fill:#2196F3,color:#FFF
+    style API_Table_Or_SQL fill:#2196F3,color:#FFF
+```
+
+### **2.1.7 Azure Data Lake Storage (ADLS) Gen2**
+
+ADLS Gen2 combines the scale and cost-effectiveness of Azure Blob Storage with features optimized for big data analytics workloads. It's not a separate service type but rather a set of capabilities enabled on a Storage Account.
+
+*   **Features:**
+    *   **Built on Blob Storage:** Inherits Blob features like tiers, lifecycle management, HA/DR options, security features.
+    *   **Hierarchical Namespace (HNS):** *Key differentiator.* Allows organizing objects into a hierarchy of directories and subdirectories, just like a file system. Enables atomic directory manipulation and improves performance for analytics jobs that rename/move directories. Enabled at the storage account level (requires new account creation).
+    *   **POSIX-like Access Control Lists (ACLs):** Provides fine-grained file and directory level permissions (Read, Write, Execute) for specific users, groups, service principals, managed identities, in addition to RBAC. Essential for securing data lakes with multiple users/teams.
+    *   **Optimized Driver (ABFS):** Azure Blob File System driver provides better performance for analytics frameworks like Azure Databricks, Azure Synapse Analytics, and HDInsight when interacting with HNS-enabled accounts.
+
+*   **Use Cases:** Primary storage for data lakes used in big data processing (ETL/ELT), data warehousing (Synapse external tables), machine learning model training data, interactive analytics.
+
+**Diagram 2.1.7.A: ADLS Gen2 vs. Blob Storage Structure Visual**
+```mermaid
+graph TD
+    subgraph BlobStorage [Standard Blob Storage - Flat Namespace]
+        direction LR
+        ContainerBlob[Container: data]
+        Blob1[blob1.csv]
+        Blob2[folder/blob2.csv] %% 'folder/' is part of the blob name
+        ContainerBlob --> Blob1 & Blob2;
+    end
+
+    subgraph ADLSGen2 [ADLS Gen2 - Hierarchical Namespace]
+        direction LR
+        ContainerADLS[Container: datalake]
+        Folder1[fa:fa-folder folder]
+        BlobADLS1[fa:fa-file blob1.csv]
+        BlobADLS2[fa:fa-file blob2.csv]
+        ContainerADLS --> Folder1;
+        ContainerADLS --> BlobADLS1;
+        Folder1 --> BlobADLS2; %% True directory structure
+    end
+
+    Note1["Blob: Directory operations like rename are slow - involves copying objects."]
+    Note2["ADLS Gen2: Directory operations are fast, atomic metadata operations."]
+    Note3["ADLS Gen2: Supports fine-grained ACLs on folders/files."]
+
+    style BlobStorage fill:#AED6F1, stroke:#3498DB
+    style ADLSGen2 fill:#A9DFBF, stroke:#2ECC71
+```
+
+### **2.1.8 Azure Cache for Redis**
+
+Azure Cache for Redis provides an in-memory data store based on the popular open-source Redis software. It's used to improve application performance and scalability by caching frequently accessed data.
+
+*   **Tiers:**
+    *   **Basic:** Single node, no SLA. For dev/test, non-critical workloads.
+    *   **Standard:** Two-node primary/replica configuration for High Availability (SLA).
+    *   **Premium:** Adds features like Persistence (RDB/AOF backups to Storage), Clustering (sharding data across multiple nodes for higher throughput/memory), VNet deployment (injection), Geo-replication (linking caches across regions - active-passive).
+    *   **Enterprise & Enterprise Flash:** Offered in partnership with Redis Labs. Adds capabilities like Redis Modules (RediSearch, RedisBloom, RedisTimeSeries), Active Geo-Replication (active-active), higher availability options. Enterprise Flash uses SSDs in addition to RAM for larger cache sizes at lower cost per GB than pure RAM.
+
+*   **Use Cases:** Application data caching (database query results, API responses), Session state management for web applications, Message brokering (Redis Pub/Sub), Rate limiting, Distributed locking.
+
+**Comparison Table 2.1.8.A: Azure Cache for Redis Tiers Comparison [Basic/Standard/Premium]**
+
+| Feature         | Basic Tier        | Standard Tier     | Premium Tier                                  |
+| :-------------- | :---------------- | :---------------- | :-------------------------------------------- |
+| **Nodes**       | 1                 | 2 [Primary/Replica]| 2+ [Clustering possible]                      |
+| **SLA**         | None              | Yes               | Yes                                           |
+| **Persistence** | No                | No                | Yes [RDB/AOF to Azure Storage]                |
+| **Clustering**  | No                | No                | Yes [Shard data across nodes]                 |
+| **VNet Deploy** | No                | No                | Yes [Inject into VNet]                        |
+| **Geo-Replication**| No             | No                | Yes [Link caches across regions]              |
+| **Scaling**     | Cache Size        | Cache Size        | Cache Size, Throughput [via Clustering]       |
+| **Use Case**    | Dev/Test          | Production Caching [HA] | High-performance, Large scale, VNet needs, DR |
+
+### **2.1.9 Overall Non-Relational Storage Selection**
+
+Choosing the right non-relational storage service depends heavily on the specific requirements of the workload.
+
+**Decision Tree 2.1.9.A: Choosing Azure Non-Relational Storage**
+```mermaid
+graph TD
+    Start{Need Non-Relational Storage} --> Q_DataType{Primary Data Type?};
+
+    Q_DataType -- Unstructured Objects [Images, Videos, Backups] --> Blob[Consider Blob Storage - Check Tiers/Lifecycle];
+    Q_DataType -- File Shares [SMB/NFS Access Needed] --> Files[Consider Azure Files - Check Tiers/Sync];
+    Q_DataType -- Simple Key/Attribute Data [Massive Scale, Low Cost] --> Table[Consider Table Storage or CosmosDB Table API];
+    Q_DataType -- Simple Message Queuing [Decoupling Tasks] --> Queue[Consider Queue Storage or Service Bus Queue];
+    Q_DataType -- Document Data [JSON-like, Flexible Schema] --> CosmosDoc[Consider CosmosDB SQL API or MongoDB API];
+    Q_DataType -- Column-Family Data [Wide Rows, High Write] --> CosmosCassandra[Consider CosmosDB Cassandra API];
+    Q_DataType -- Graph Data [Nodes/Edges/Relationships] --> CosmosGremlin[Consider CosmosDB Gremlin API];
+    Q_DataType -- Data Lake / Big Data Analytics --> ADLS[Use ADLS Gen2 - HNS Enabled Storage Account];
+    Q_DataType -- In-Memory Caching [Low Latency Key/Value] --> Redis[Consider Azure Cache for Redis - Check Tiers];
+
+    Blob --> End{Select Service & Configure};
+    Files --> End;
+    Table --> End;
+    Queue --> End;
+    CosmosDoc --> End;
+    CosmosCassandra --> End;
+    CosmosGremlin --> End;
+    ADLS --> End;
+    Redis --> End;
+
+    style Start fill:#FF9800,color:#FFF
+```
+
+---
+
+## **2.2 Design Relational Data Storage**
+
+Relational databases store data in tables with predefined schemas, enforcing relationships and consistency. Azure offers several managed relational database services (PaaS) as well as the option to run databases on IaaS VMs.
+
+### **2.2.1 Azure SQL Database**
+
+Azure SQL Database is a fully managed Platform-as-a-Service (PaaS) database engine based on the latest stable Enterprise Edition of Microsoft SQL Server. It handles management operations like patching, backups, monitoring, and high availability.
+
+*   **Deployment Options:**
+    *   **Single Database:** A fully managed, isolated database. Resources are dedicated to this database. Suitable for most modern cloud applications.
+    *   **Elastic Pool:** A collection of single databases that share a set pool of resources (eDTUs or vCores). Cost-effective for managing multiple databases with variable and unpredictable usage demands (SaaS apps, databases per tenant). Allows databases to automatically scale within pool limits.
+    *   **Managed Instance (MI):** A fully managed SQL Server instance hosted in Azure, providing near 100% compatibility with on-premises SQL Server (including features like SQL Agent, Service Broker, CLR, DB Mail). Deployed within your VNet for network isolation. Ideal for migrating existing on-prem SQL Server applications with minimal changes.
+
+*   **Purchasing Models:**
+    *   **DTU (Database Transaction Unit):** Bundles compute, memory, and I/O resources into predefined performance levels (Basic, Standard, Premium). Simpler model, good for predictable workloads where resource ratios are balanced. Cannot use Reserved Capacity or AHB.
+    *   **vCore (Virtual Core):** Allows independent scaling of compute (vCores) and storage. Provides greater transparency and control. Eligible for Azure Hybrid Benefit and Reserved Capacity/Savings Plans. Preferred model for most new deployments.
+
+*   **Service Tiers (vCore Model):** Define performance, storage type, HA/DR capabilities.
+    *   **General Purpose:** Balanced price-performance for most business workloads. Uses Premium SSD remote storage. Offers a Serverless compute option. HA based on separating compute and storage with failover replica.
+    *   **Business Critical:** Highest performance and resilience for mission-critical applications with low latency I/O requirements. Uses local SSD storage. Includes multiple readable secondary replicas for HA and read scale-out. Highest cost.
+    *   **Hyperscale:** Optimized for Very Large Databases (VLDBs - up to 100TB). Architecture separates compute, log service, and page servers for rapid scaling (compute/storage independently), fast backups/restores regardless of data size. Not all SQL features supported initially (evolving).
+
+*   **Compute Tiers (vCore Model):**
+    *   **Provisioned:** Dedicated compute resources allocated continuously. Predictable performance and cost.
+    *   **Serverless (General Purpose Tier Only):** Compute automatically scales based on workload demand and pauses during inactivity (configurable delay). Billed per second for compute used. Ideal for intermittent, unpredictable workloads where paying for idle compute is undesirable.
+
+*   **High Availability (HA) & Disaster Recovery (DR):**
+    *   **HA:** Built-in automatically based on service tier (e.g., redundant replicas in Business Critical). Zone Redundancy option available for GP/BC/Hyperscale in supported regions.
+    *   **DR:**
+        *   **Geo-Replication (Active Geo-Replication):** Create readable secondary databases in different regions. Manual failover. Available for all tiers.
+        *   **Failover Groups:** Builds on geo-replication by providing a single listener endpoint (read-write and optional read-only) that automatically redirects connections to the current primary database after failover. Simplifies application connection strings. Supports automatic or manual failover policies.
+
+*   **Security:**
+    *   **Network:** IP Firewall rules, Virtual Network rules (Service Endpoints), Private Endpoints.
+    *   **Authentication:** SQL Authentication (username/password), Microsoft Entra ID Authentication (Integrated, Password, Service Principal, Managed Identity).
+    *   **Authorization:** Database roles, Server roles (MI), Object-level permissions.
+    *   **Data Protection:** Transparent Data Encryption (TDE - encrypts data at rest, default), Always Encrypted (client-side encryption protecting sensitive data even from DBAs), Dynamic Data Masking (obfuscates data for non-privileged users).
+    *   **Auditing:** Track database events to logs (Storage, Log Analytics, Event Hubs).
+
+**Comparison Table 2.2.1.A: SQL DB Single vs. Elastic Pool vs. Managed Instance Comparison**
+
+| Feature             | Single Database                     | Elastic Pool                        | Managed Instance (MI)                 |
+| :------------------ | :---------------------------------- | :---------------------------------- | :------------------------------------ |
+| **Resource Model**  | Dedicated resources per DB          | Shared resources across DBs         | Dedicated SQL Server Instance         |
+| **Management**      | Fully Managed DB                    | Fully Managed Pool + DBs            | Fully Managed Instance                |
+| **Compatibility**   | High (Latest SQL Engine Features)   | High (Latest SQL Engine Features)   | Very High (Near 100% SQL Server)      |
+| **VNet Integration**| Optional (Service/Private Endpoint) | Optional (Service/Private Endpoint) | Required (Deployed inside VNet)       |
+| **Key Features**    | Serverless option, Hyperscale tier  | Cost efficiency for many DBs        | SQL Agent, CLR, Service Broker, DB Mail |
+| **Use Case**        | New cloud apps, Most workloads      | SaaS apps, Multi-tenant DBs         | Lift-and-shift on-prem SQL Server     |
+| **Cost Model**      | Per DB (DTU or vCore)               | Per Pool (eDTU or vCore)            | Per Instance (vCore only)             |
+
+**Comparison Table 2.2.1.B: SQL DB Service Tiers Comparison [GP vs. BC vs. Hyperscale - vCore]**
+
+| Feature             | General Purpose                     | Business Critical                   | Hyperscale                          |
+| :------------------ | :---------------------------------- | :---------------------------------- | :---------------------------------- |
+| **Performance**     | Good (Balanced)                     | Highest (Low Latency)               | High (Optimized for VLDBs)          |
+| **Storage Type**    | Remote Premium SSD                  | Local SSD                           | Decoupled Page Servers              |
+| **IO Latency**      | Higher (5-10ms)                     | Lowest (1-2ms)                      | Low (Depends on cache)              |
+| **HA Architecture** | Remote Storage + Compute Replica    | Multiple Replicas (Always On AG)    | Redundant Page Servers/Log Service  |
+| **Readable Secondary**| No                                  | Yes (1 included)                    | Yes (Named Replicas optional)       |
+| **Max DB Size**     | ~4TB (Depends on compute)           | ~4TB (Depends on compute)           | 100TB                               |
+| **Backup/Restore**  | Size-of-data dependent              | Size-of-data dependent              | Fast (Snapshot-based, constant time)|
+| **Serverless Option**| Yes                                 | No                                  | No (Preview possible)               |
+| **Use Case**        | Most business apps, Dev/Test        | Mission-critical, Low-latency apps  | Very Large Databases (VLDBs)        |
+| **Cost**            | Moderate                            | Highest                             | High (Optimized for large scale)    |
+
+**Diagram 2.2.1.C: Azure SQL DB Failover Group Architecture Visual**
+```mermaid
+graph TD
+    App[fa:fa-laptop Application] --> ListenerRW{Read-Write Listener Endpoint};
+    App --> ListenerRO{Read-Only Listener Endpoint [Optional]};
+
+    subgraph PrimaryRegion [Primary Region - West US]
+        ListenerRW -- Points To --> PrimaryDB[(fa:fa-database Primary SQL DB)];
+        ListenerRO -- Points To --> SecondaryReadable1[(fa:fa-database Readable Secondary 1)]; %% Only if BC/HS or Active Geo-Rep
+    end
+
+    subgraph SecondaryRegion [Secondary Region - East US]
+        SecondaryDB[(fa:fa-database Secondary SQL DB)];
+        ListenerRO -- Can Point To --> SecondaryDB; %% If configured
+    end
+
+    PrimaryDB -- Geo-Replication --> SecondaryDB;
+
+    Failover[Initiate Failover <br/> fa:fa-exchange-alt] -- Updates Listener --> ListenerRW;
+    Failover -- Promotes --> SecondaryDB;
+    Failover -- Demotes --> PrimaryDB;
+
+    %% After Failover
+    %% ListenerRW now points to SecondaryDB in East US
+
+    style PrimaryRegion fill:#A9DFBF, stroke:#2ECC71
+    style SecondaryRegion fill:#AED6F1, stroke:#3498DB
+    style ListenerRW fill:#F39C12,color:#FFF
+    style ListenerRO fill:#F39C12,color:#FFF
+    style Failover fill:#E74C3C,color:#FFF
+```
+
+### **2.2.2 Azure Database for PostgreSQL / MySQL / MariaDB**
+
+These services offer fully managed open-source database engines (PostgreSQL, MySQL, MariaDB) as a PaaS offering.
+
+*   **Deployment Options:**
+    *   **Single Server:** Original offering. Less flexible networking and configuration. Being phased out for new deployments in favor of Flexible Server.
+    *   **Flexible Server:** Newer architecture offering better price-performance, more control over configuration, VNet integration (via VNet injection), custom maintenance windows, Burstable compute SKUs, and built-in High Availability options. Preferred deployment model.
+    *   **Hyperscale (Citus) - PostgreSQL Only:** Provides horizontal scaling (sharding) for PostgreSQL using the Citus extension. For distributed query processing across multiple nodes.
+
+*   **High Availability (Flexible Server):**
+    *   **Same-Zone HA:** Provisions a standby replica within the same Availability Zone. Synchronous replication. Automatic failover.
+    *   **Zone-Redundant HA:** Provisions a standby replica in a different Availability Zone within the same region. Synchronous replication. Automatic failover. Provides higher availability against zone failures.
+
+*   **Read Replicas:** Create up to 5 read-only replicas (asynchronous replication) within the same region or across regions to scale out read workloads or for DR purposes. Manual promotion required for DR failover.
+*   **Security:** Firewall rules, Private Link support, VNet integration (Flexible Server), SSL enforcement, Microsoft Entra ID authentication support (PostgreSQL/MySQL).
+
+**Comparison Table 2.2.2.A: Flexible Server vs. Single Server Comparison [OSS DBs]**
+
+| Feature             | Flexible Server                     | Single Server [Legacy]              |
+| :------------------ | :---------------------------------- | :---------------------------------- |
+| **Architecture**    | Newer (Container-based)             | Older                               |
+| **VNet Integration**| Yes (VNet Injection)                | Limited (Service Endpoints)         |
+| **High Availability**| Yes (Same-Zone / Zone-Redundant)    | Limited (Read Replicas only)        |
+| **Compute SKUs**    | General Purpose, Memory Optimized, Burstable | General Purpose, Memory Optimized |
+| **Maintenance**     | Custom Maintenance Windows          | Service Managed Window              |
+| **Stop/Start**      | Yes                                 | No                                  |
+| **Cost**            | Often better Price/Performance      | Can be higher for equivalent perf.  |
+| **Recommendation**  | Preferred for new deployments       | Avoid for new deployments           |
+
+### **2.2.3 SQL Server on Azure Virtual Machines (IaaS)**
+
+Running SQL Server on an Azure VM provides maximum control and compatibility, essentially lifting and shifting an on-premises SQL Server environment to Azure infrastructure.
+
+*   **Use Cases:**
+    *   Full control over OS and SQL Server instance configuration needed.
+    *   Specific SQL Server versions or features required that are not available in PaaS offerings (e.g., older versions, Filestream, PolyBase on older versions).
+    *   Lift-and-shift migrations with minimal changes.
+    *   Dependencies on OS-level features or third-party software running alongside SQL Server.
+    *   Consolidating SQL Server and application components on the same VM (less common).
+
+*   **Management:** Customer is responsible for:
+    *   OS and SQL Server patching and updates.
+    *   High Availability configuration (e.g., Windows Server Failover Clustering - WSFC, Always On Availability Groups - AGs, Failover Cluster Instances - FCIs).
+    *   Disaster Recovery setup (e.g., Log Shipping, AGs across regions).
+    *   Backup configuration (SQL native backups, Azure Backup for SQL Server in VM).
+    *   Performance tuning and monitoring.
+
+*   **SQL IaaS Agent Extension:** Optional extension providing integration with Azure portal for manageability benefits like automated backups, automated patching, simplified licensing (AHB), Key Vault integration for TDE, monitoring metrics. Recommended for all SQL VMs.
+*   **Storage Configuration:** Use Premium SSD Managed Disks (P30 or higher recommended for performance). Configure multiple disks and use Storage Spaces (Windows) or LVM/mdadm (Linux) for optimal IOPS/throughput. Separate disks for Data, Logs, TempDB. Enable Read caching on data disks, None on log disks.
+
+**Comparison Table 2.2.3.A: Azure SQL DB/MI vs. SQL Server on Azure VM Comparison**
+
+| Feature             | Azure SQL DB / Managed Instance [PaaS] | SQL Server on Azure VM [IaaS]         |
+| :------------------ | :------------------------------------- | :------------------------------------ |
+| **Management**      | Azure Managed (Patching, Backups, HA)  | Customer Managed                      |
+| **Control**         | Limited (DB/Instance Level)            | Full (OS & SQL Instance Level)        |
+| **Compatibility**   | High (MI very high)                    | 100% (Any supported SQL version)      |
+| **HA/DR**           | Built-in / Easy Configuration          | Manual Configuration (AGs, FCI, etc.) |
+| **Feature Set**     | Latest stable features (some limitations in MI vs latest SQL) | All SQL Server features available     |
+| **Licensing**       | Included (vCore) or AHB eligible       | BYOL (AHB) or Pay-as-you-go           |
+| **Cost**            | Can be lower TCO due to reduced ops    | Infrastructure + License + Ops Costs  |
+| **Initial Setup**   | Faster Provisioning                    | Slower (OS + SQL Install/Config)      |
+| **Use Case**        | New Apps, Modernization, Reduced Ops   | Lift-and-Shift, Max Control, Specific Features |
+
+### **2.2.4 Overall Relational Storage Selection**
+
+Choosing the right relational database service involves balancing compatibility, management overhead, features, performance, and cost.
+
+**Decision Tree 2.2.4.A: Choosing Azure Relational Storage**
+```mermaid
+graph TD
+    Start{Need Relational DB} --> Q_Engine{DB Engine Required?};
+
+    Q_Engine -- SQL Server --> Q_Compatibility{Need High On-Prem SQL Server Compatibility? [e.g., SQL Agent, CLR]};
+    Q_Engine -- PostgreSQL --> PG_Flex[Choose Azure DB for PostgreSQL - Flexible Server];
+    Q_Engine -- MySQL --> MySQL_Flex[Choose Azure DB for MySQL - Flexible Server];
+    Q_Engine -- MariaDB --> MariaDB_Flex[Choose Azure DB for MariaDB - Flexible Server];
+
+    Q_Compatibility -- Yes --> MI[Choose Azure SQL Managed Instance];
+    Q_Compatibility -- No --> Q_Control{Prefer PaaS [Managed Service] or IaaS [Full Control]?};
+
+    Q_Control -- PaaS --> Q_MultiDB{Need Cost Optimization for Many Variable DBs?};
+    Q_Control -- IaaS --> SQLVM[Choose SQL Server on Azure VM];
+
+    Q_MultiDB -- Yes --> ElasticPool[Choose Azure SQL DB - Elastic Pool];
+    Q_MultiDB -- No --> SingleDB[Choose Azure SQL DB - Single Database];
+
+    PG_Flex --> End{Select Service & Configure Tier};
+    MySQL_Flex --> End;
+    MariaDB_Flex --> End;
+    MI --> End;
+    SQLVM --> End;
+    ElasticPool --> End;
+    SingleDB --> End;
+
+    style Start fill:#FF9800,color:#FFF
+    style MI fill:#2ECC71,color:#FFF
+    style SQLVM fill:#AED6F1,color:#000
+    style ElasticPool fill:#A9DFBF,color:#FFF
+    style SingleDB fill:#A9DFBF,color:#FFF
+    style PG_Flex fill:#A9DFBF,color:#FFF
+    style MySQL_Flex fill:#A9DFBF,color:#FFF
+    style MariaDB_Flex fill:#A9DFBF,color:#FFF
+```
+
+---
+
+## **2.3 Design Data Integration**
+
+Data integration involves moving and transforming data between various storage systems, often as part of Extract, Transform, Load (ETL) or Extract, Load, Transform (ELT) processes. Azure provides several services tailored for different data integration scenarios.
+
+### **2.3.1 Azure Data Factory (ADF)**
+
+ADF is Azure's cloud-based, serverless ETL and data integration service for orchestrating and automating data movement and transformation at scale.
+
+*   **Core Components:**
+    *   **Pipeline:** A logical grouping of activities that perform a unit of work (e.g., copy data, transform data).
+    *   **Activity:** Represents a processing step in a pipeline. Types include Data Movement (Copy Activity), Data Transformation (Mapping Data Flow, Wrangling Data Flow, Databricks, Stored Proc, U-SQL), and Control Flow (Execute Pipeline, ForEach, If Condition, Wait, Webhook).
+    *   **Dataset:** Represents the data structure within a data store (e.g., a specific SQL table, a folder in Blob storage). Points to a Linked Service.
+    *   **Linked Service:** Connection string information needed to connect to external resources (data stores or compute environments).
+    *   **Trigger:** Defines when a pipeline execution should start (Schedule, Tumbling Window - time slices, Storage Event, Custom Event).
+    *   **Integration Runtime (IR):** The compute infrastructure used by ADF to provide data movement, activity dispatch, and SSIS package execution capabilities across different network environments.
+        *   **Azure IR:** Default serverless compute in Azure for cloud-to-cloud data movement and data flow execution. Region-specific.
+        *   **Self-Hosted IR:** Software installed on on-premises machines or VMs in other clouds/VNets to enable data movement/activity dispatch involving private networks. Acts as a secure gateway.
+        *   **Azure-SSIS IR:** Dedicated Azure compute for natively executing SQL Server Integration Services (SSIS) packages lifted-and-shifted to the cloud.
+
+*   **Data Flows:** Provide code-free data transformation capabilities at scale.
+    *   **Mapping Data Flows:** Visually design transformations (joins, aggregates, pivots, lookups, etc.) that execute on a scaled-out Azure Databricks Spark cluster managed by ADF. Suitable for complex transformations on large datasets (ELT/ETL).
+    *   **Wrangling Data Flows (Power Query):** Use the Power Query Online mashup editor (familiar from Power BI/Excel) to perform data preparation and wrangling. Translates M code into Spark code for execution. Good for code-free data exploration and prep.
+
+*   **Use Cases:** Cloud ETL/ELT, Data migration from on-prem/other clouds, Data warehousing data loading, Orchestrating big data workflows involving Databricks/Synapse/HDInsight.
+
+**Diagram 2.3.1.A: Azure Data Factory Pipeline Flow with Integration Runtime Visual**
+```mermaid
+graph TD
+    Trigger[fa:fa-clock Trigger <br/> Schedule / Event] --> Pipeline[fa:fa-project-diagram ADF Pipeline];
+
+    subgraph Pipeline Activities
+        direction LR
+        CopyActivity[Copy Data Activity]
+        DataFlowActivity[Mapping Data Flow Activity]
+        ControlActivity[Control Flow Activity <br/> e.g., ForEach]
+    end
+
+    Pipeline --> CopyActivity & DataFlowActivity & ControlActivity;
+
+    subgraph Connections
+        LinkedService_Source[Linked Service - Source <br/> e.g., OnPrem SQL]
+        LinkedService_Sink[Linked Service - Sink <br/> e.g., Azure Blob]
+        LinkedService_Compute[Linked Service - Compute <br/> e.g., Databricks]
+        Dataset_Source[Dataset - Source Table]
+        Dataset_Sink[Dataset - Sink Folder]
+    end
+
+    CopyActivity -- Uses --> LinkedService_Source & Dataset_Source;
+    CopyActivity -- Uses --> LinkedService_Sink & Dataset_Sink;
+    DataFlowActivity -- Uses --> LinkedService_Compute; %% For Spark Cluster
+
+    subgraph IntegrationRuntimes [Integration Runtimes]
+        AzureIR[Azure IR <br/> Cloud Sources / Data Flow]
+        SelfHostedIR[Self-Hosted IR <br/> On-Prem / Private VNet Sources]
+    end
+
+    LinkedService_Source -- Requires --> SelfHostedIR;
+    LinkedService_Sink -- Uses --> AzureIR;
+    DataFlowActivity -- Executes On --> AzureIR; %% Managed Spark
+
+    style Trigger fill:#F39C12,color:#FFF
+    style Pipeline fill:#8E44AD,color:#FFF
+    style Connections fill:#3498DB,color:#FFF
+    style IntegrationRuntimes fill:#1ABC9C,color:#FFF
+```
+
+### **2.3.2 Azure Synapse Analytics**
+
+Azure Synapse is an integrated analytics service that brings together enterprise data warehousing and Big Data analytics. It provides a unified experience for ingesting, preparing, managing, and serving data for immediate BI and machine learning needs.
+
+*   **Workspace Components:**
+    *   **Synapse Studio:** Unified web UI for development, management, monitoring.
+    *   **SQL Pools:**
+        *   **Dedicated SQL Pool (formerly SQL DW):** Enterprise data warehousing using Massively Parallel Processing (MPP) architecture. Stores data in relational tables with columnar storage. Scales compute independently from storage (Data Warehouse Units - DWUs). Best for structured data warehousing, high-performance BI queries.
+        *   **Serverless SQL Pool:** Query engine for data in the data lake (ADLS Gen2, Cosmos DB) using familiar T-SQL syntax. Pay-per-query (data processed). No infrastructure to manage. Ideal for data exploration, logical data warehouse over data lake.
+    *   **Apache Spark Pools:** Managed Spark clusters for big data processing, data engineering, machine learning using notebooks (Python, Scala, SQL, .NET). Autoscaling, auto-pausing.
+    *   **Data Explorer Pools (Preview):** Optimized engine for log and telemetry analytics using KQL.
+    *   **Synapse Pipelines:** Embeds the capabilities of Azure Data Factory within the Synapse workspace for code-free data integration and orchestration.
+    *   **Integration with Power BI, Azure ML.**
+
+*   **Use Cases:** Modern data warehousing, unifying batch/streaming/interactive analytics, building logical data warehouses over data lakes, BI reporting, machine learning on large datasets.
+
+**Diagram 2.3.2.A: Azure Synapse Analytics Workspace Architecture Visual**
+```mermaid
+graph TD
+    subgraph SynapseWorkspace [Azure Synapse Workspace]
+        SynapseStudio[fa:fa-desktop Synapse Studio UI]
+
+        subgraph DataStorage [Integrated Storage]
+            ADLS[fa:fa-database ADLS Gen2 - Data Lake]
+        end
+
+        subgraph ComputeEngines [Analytics Runtimes]
+            DedicatedSQL[Dedicated SQL Pool - MPP DW]
+            ServerlessSQL[Serverless SQL Pool - Query Lake]
+            SparkPool[Apache Spark Pool - Big Data / ML]
+            DataExplorerPool[Data Explorer Pool - Logs / Telemetry]
+        end
+
+        subgraph DataIntegration [Data Integration]
+            Pipelines[Synapse Pipelines - ADF Engine]
+        end
+
+        SynapseStudio -- Manages / Develops --> DedicatedSQL & ServerlessSQL & SparkPool & DataExplorerPool & Pipelines;
+        Pipelines -- Ingests / Moves Data --> ADLS & DedicatedSQL;
+        ServerlessSQL -- Queries --> ADLS;
+        SparkPool -- Processes / Queries --> ADLS;
+        DedicatedSQL -- Stores / Queries --> DedicatedSQL; %% Internal Storage
+        DataExplorerPool -- Ingests / Queries --> DataExplorerPool; %% Internal Storage
+
+        ADLS -- Data Source For --> ServerlessSQL & SparkPool & DedicatedSQL [via PolyBase/COPY];
+    end
+
+    ExternalTools[BI Tools - Power BI / ML Tools - Azure ML] --> DedicatedSQL & ServerlessSQL & SparkPool;
+
+    style SynapseWorkspace fill:#0078D4,stroke:#FFF,stroke-width:2px,color:#FFF
+    style ComputeEngines fill:#A9DFBF, stroke:#2ECC71
+    style DataIntegration fill:#AED6F1, stroke:#3498DB
+    style DataStorage fill:#FAD7A0, stroke:#F39C12
+    style ExternalTools fill:#9B59B6,color:#FFF
+```
+
+**Comparison Table 2.3.2.B: Synapse Dedicated SQL Pool vs. Serverless SQL Pool Comparison**
+
+| Feature         | Dedicated SQL Pool [MPP DW]     | Serverless SQL Pool             |
+| :-------------- | :------------------------------ | :------------------------------ |
+| **Architecture**| MPP [Control Node + Compute Nodes]| Distributed Query Engine        |
+| **Data Storage**| Managed Relational Tables       | External [ADLS Gen2, Cosmos DB] |
+| **Compute**     | Provisioned [DWUs], Scalable    | Serverless, Auto-scales         |
+| **Cost Model**  | Per Hour [DWU Provisioned] + Storage | Per Query [TB Data Processed]   |
+| **Primary Use** | Enterprise Data Warehousing, BI | Data Lake Exploration, Logical DW |
+| **Data Loading**| Required [COPY, PolyBase, ADF]  | Query data in place             |
+| **Management**  | Higher [Stats, Indexing]        | Lower                           |
+
+### **2.3.3 Azure Databricks**
+
+Azure Databricks is a first-party Azure service offering an optimized Apache Spark-based analytics platform. It's designed for collaboration between data scientists, data engineers, and business analysts.
+
+*   **Platform Features:**
+    *   **Collaborative Notebooks:** Support multiple languages (Python, Scala, SQL, R) for interactive data analysis and visualization.
+    *   **Managed Spark Clusters:** Easy creation, configuration, and autoscaling of Spark clusters. Optimized Databricks Runtime includes performance enhancements and common libraries.
+    *   **Delta Lake:** Open-source storage layer bringing ACID transactions, scalable metadata handling, time travel (data versioning), schema enforcement/evolution to data lakes (typically ADLS Gen2). Default storage format in Databricks.
+    *   **MLflow Integration:** Managed service for the machine learning lifecycle (tracking experiments, packaging code, deploying models).
+    *   **Job Scheduling:** Schedule notebooks or JARs to run as automated jobs.
+    *   **Workspace:** Collaborative environment for managing notebooks, clusters, jobs, libraries, models.
+    *   **Security:** VNet injection for network isolation, Entra ID integration, Secrets management (integration with Key Vault via Databricks secrets scopes), Cluster policies, Table ACLs (on Unity Catalog).
+
+*   **Use Cases:** Large-scale data processing (ETL/ELT) using Spark, Interactive data exploration and visualization, Machine learning model training and deployment, Streaming analytics (Spark Structured Streaming). Often used alongside ADF (ADF orchestrates Databricks notebooks) or Synapse.
+
+**Comparison Table 2.3.3.A: ADF vs. Synapse Pipelines vs. Databricks for ETL/ELT Comparison**
+
+| Feature             | Azure Data Factory [ADF]        | Synapse Pipelines                 | Azure Databricks                    |
+| :------------------ | :------------------------------ | :-------------------------------- | :---------------------------------- |
+| **Primary Focus**   | Orchestration, Data Movement    | Orchestration within Synapse      | Spark-based Processing, ML, Analytics |
+| **Transformation**  | Mapping Data Flows [Visual Spark], Wrangling Data Flows [Power Query], Code Activities | Mapping Data Flows, Wrangling Data Flows, Code Activities | Spark Code [Python, Scala, SQL, R] in Notebooks/JARs |
+| **Compute Engine**  | Managed Serverless Spark [Data Flows], Azure/Self-Hosted IR [Copy/Control] | Managed Serverless Spark [Data Flows], SQL/Spark Pools [Code] | Managed Spark Clusters              |
+| **User Interface**  | Visual Drag-and-Drop            | Visual Drag-and-Drop [Synapse Studio] | Notebook-based, Code-centric        |
+| **Skillset**        | Low-code / Pro-code             | Low-code / Pro-code               | Code-heavy [Spark, Python, Scala]   |
+| **Cost Model**      | Per Activity Run, DIU Hours [Data Flows], IR Hours | Per Activity Run, DIU Hours, Pool Usage | Per Cluster Uptime [DBUs]           |
+| **Integration**     | Broad connectors, Standalone    | Integrated within Synapse Workspace | Strong Spark ecosystem, Azure integration |
+| **Best For**        | Orchestrating diverse tasks, Code-free complex transforms | Unified analytics platform tasks    | Complex code-based transforms, ML, Spark experts |
+
+### **2.3.4 Event Ingestion Services Recap**
+
+While primarily messaging/eventing services, these are often the starting point for data integration pipelines, feeding data into storage or processing systems.
+*   **Event Hubs:** High-throughput ingestion for telemetry, application logs, streaming data. Data often landed in ADLS Gen2 via Event Hubs Capture or processed by Stream Analytics/Spark/Functions before landing.
+*   **IoT Hub:** Similar to Event Hubs but adds device management, security, and bi-directional communication capabilities for IoT scenarios.
+*   **Service Bus:** Used less for raw ingestion, more for reliable enterprise messaging between applications, which might then trigger data processing.
+*   **Event Grid:** Routes discrete events (e.g., Blob Created event) which can trigger ADF pipelines or Functions to process the newly arrived data.
+
+---
+**(End of Section 2)**
