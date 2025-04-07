@@ -1866,3 +1866,457 @@ While primarily messaging/eventing services, these are often the starting point 
 
 ---
 **(End of Section 2)**
+
+Okay, let's build out Section 3: Design Business Continuity Solutions in full detail, including explanations, Mermaid.js diagrams, and comparison tables, avoiding parentheses in the Mermaid code.
+
+---
+
+**(Start of Section 3)**
+
+# **Section 3: Design Business Continuity Solutions**
+
+Business Continuity (BC) encompasses strategies and practices that ensure essential business functions can continue during and after a disruption. In the context of Azure, this primarily involves designing for **High Availability (HA)** to handle localized failures within a region, and **Disaster Recovery (DR)** to recover from large-scale events affecting an entire region. Key metrics guiding these designs are the **Recovery Time Objective (RTO)** - the maximum acceptable downtime after a disaster, and the **Recovery Point Objective (RPO)** - the maximum acceptable amount of data loss measured in time. This section covers Azure services and architectural patterns to achieve desired levels of HA and DR based on business requirements.
+
+---
+
+## **3.1 Design for High Availability (HA)**
+
+High Availability focuses on preventing downtime within a single Azure region by eliminating single points of failure and ensuring services can withstand localized hardware or software issues, including datacenter-level failures when using Availability Zones.
+
+### **3.1.1 Foundational Concepts**
+
+*   **Redundancy:** Deploying multiple instances of components (VMs, database replicas, load balancers) so that if one fails, others can take over.
+*   **Fault Domains (FDs):** Groups of resources sharing common infrastructure like power, cooling, and network switches within a datacenter (representing a physical rack). Spreading VM instances across FDs protects against rack-level hardware failures. Azure typically manages FD allocation.
+*   **Update Domains (UDs):** Groups of resources that may be rebooted or updated together during planned maintenance. Spreading VM instances across UDs ensures that only a subset of instances are impacted by maintenance at any given time. Azure typically manages UD allocation.
+*   **Service Level Agreements (SLAs):** Microsoft's commitment regarding uptime and connectivity for Azure services. SLAs often depend on specific configurations (e.g., deploying multiple VMs across Availability Zones or within an Availability Set). Achieving higher SLAs usually requires implementing redundancy.
+
+### **3.1.2 Compute HA**
+
+Ensuring compute resources remain available during failures.
+
+*   **Availability Sets:** A logical grouping capability for VMs within a datacenter that ensures VMs are spread across multiple Fault Domains and Update Domains.
+    *   **Protection:** Protects against hardware failures within a DC (FDs) and impact from planned maintenance (UDs).
+    *   **Scope:** Within a single datacenter. Does *not* protect against DC failure.
+    *   **Configuration:** You place VMs into an Availability Set during creation. Azure manages the FD/UD placement (typically 2-3 FDs and 5-20 UDs per set).
+    *   **SLA:** Requires deploying at least two VMs in the Availability Set to qualify for the VM SLA (e.g., 99.95%).
+
+*   **Availability Zones (AZs):** Physically separate locations within an Azure region, each with independent power, cooling, and networking. Composed of one or more datacenters.
+    *   **Protection:** Protects against entire datacenter failures within a region.
+    *   **Scope:** Regional concept. Not all regions have AZs.
+    *   **Configuration:** You explicitly choose the Zone (e.g., Zone 1, 2, or 3) when deploying resources (VMs, Managed Disks, Public IPs, Load Balancers, etc.).
+    *   **Zone-redundant Services:** Some services automatically replicate or operate across multiple zones without explicit configuration (e.g., ZRS storage, Standard Load Balancer, App Gateway v2, some database tiers).
+    *   **SLA:** Requires deploying at least two VMs across two or more Availability Zones in the same region to qualify for the highest VM SLA (e.g., 99.99%).
+
+*   **VM Scale Sets (VMSS):** Used to deploy and manage a set of identical, autoscaling VMs. Can be configured to deploy VMs across Availability Zones (recommended for HA) or within an Availability Set (less common now).
+
+**Diagram 3.1.2.A: Availability Set UDs FDs Visualization**
+```mermaid
+graph TD
+    AvSet[Availability Set]
+
+    subgraph FaultDomain1 [Fault Domain 1 - Rack 1]
+        direction TB
+        UD1_FD1(VM1 <br/> UD 1)
+        UD2_FD1(VM4 <br/> UD 2)
+        UD3_FD1(...)
+    end
+
+    subgraph FaultDomain2 [Fault Domain 2 - Rack 2]
+        direction TB
+        UD1_FD2(VM2 <br/> UD 1)
+        UD2_FD2(VM5 <br/> UD 2)
+        UD3_FD2(...)
+    end
+
+     subgraph FaultDomain3 [Fault Domain 3 - Rack 3]
+        direction TB
+        UD1_FD3(VM3 <br/> UD 1)
+        UD2_FD3(VM6 <br/> UD 2)
+        UD3_FD3(...)
+    end
+
+    AvSet --> FaultDomain1 & FaultDomain2 & FaultDomain3;
+
+    Note1["VMs spread across FDs for hardware failure protection."]
+    Note2["VMs spread across UDs for planned maintenance protection."]
+
+    style AvSet fill:#8E44AD,color:#FFF
+    style FaultDomain1 fill:#AED6F1, stroke:#3498DB
+    style FaultDomain2 fill:#AED6F1, stroke:#3498DB
+    style FaultDomain3 fill:#AED6F1, stroke:#3498DB
+```
+
+**Diagram 3.1.2.B: Availability Zones Architecture Compute Visual**
+```mermaid
+graph TD
+    Region[Azure Region]
+
+    subgraph AZ1 [Availability Zone 1 - DC A]
+        VM1(VM 1)
+        VMSS1_1(VMSS1 Instance A)
+    end
+
+    subgraph AZ2 [Availability Zone 2 - DC B]
+        VM2(VM 2)
+        VMSS1_2(VMSS1 Instance B)
+    end
+
+    subgraph AZ3 [Availability Zone 3 - DC C]
+        VM3(VM 3)
+        VMSS1_3(VMSS1 Instance C)
+    end
+
+    Region --> AZ1 & AZ2 & AZ3;
+
+    LB[fa:fa-server Standard Load Balancer <br/> Zone-Redundant Frontend] --> VM1 & VM2 & VM3;
+    LB --> VMSS1_1 & VMSS1_2 & VMSS1_3; %% Assuming LB targets VMSS
+
+    Note["VMs / VMSS Instances deployed across physically separate zones."]
+    Note2["Protects against datacenter failure."]
+    Note3["Requires Zone-Redundant Load Balancer."]
+
+
+    style Region fill:#2C3E50,color:#FFF
+    style AZ1 fill:#A9DFBF, stroke:#2ECC71
+    style AZ2 fill:#A9DFBF, stroke:#2ECC71
+    style AZ3 fill:#A9DFBF, stroke:#2ECC71
+    style LB fill:#F39C12,color:#FFF
+```
+
+**Comparison Table 3.1.2.C: Availability Sets vs. Availability Zones Comparison**
+
+| Feature             | Availability Sets                     | Availability Zones                    |
+| :------------------ | :------------------------------------ | :------------------------------------ |
+| **Protection Scope**| Hardware failure within a DC          | Datacenter failure within a Region    |
+| **Latency**         | Lowest (within DC)                    | Slightly higher (inter-zone)          |
+| **Regional Support**| All regions                           | Supported regions only                |
+| **Configuration**   | Place VMs in Set                      | Choose Zone during resource creation  |
+| **VM SLA Example**  | 99.95% [with >=2 VMs]                 | 99.99% [with >=2 VMs across zones]    |
+| **Cost**            | No additional VM cost                 | No additional VM cost [Data transfer between zones may apply] |
+| **Use Case**        | Basic HA within a DC                  | Higher HA against DC failure          |
+| **Recommendation**  | Use Zones where available             | Preferred for HA in supported regions |
+
+### **3.1.3 Storage HA**
+
+Ensuring storage availability during failures.
+
+*   **Managed Disks:** Block-level storage volumes for Azure VMs.
+    *   **Locally-redundant storage (LRS) Disks:** Three copies within one DC. Standard option.
+    *   **Zone-redundant storage (ZRS) Disks (Preview):** Synchronously replicates data across three Availability Zones in the region. Provides tolerance to zone failures for VM disks. Higher cost than LRS.
+
+*   **Storage Accounts:**
+    *   **LRS:** Three copies in one DC.
+    *   **ZRS:** Three copies across three AZs. Provides higher availability for Blob, File (Standard), Queue, Table data within a region.
+    *   **GZRS / RA-GZRS:** Combines ZRS in the primary region with geo-replication, offering the highest durability and availability against both zone and regional failures.
+
+**Comparison Table 3.1.3.A: Storage Redundancy for HA Comparison [LRS vs. ZRS]**
+
+| Feature             | LRS [Locally Redundant]       | ZRS [Zone Redundant]            |
+| :------------------ | :---------------------------- | :------------------------------ |
+| **Copies**          | 3                             | 3                               |
+| **Scope**           | Single Datacenter / Rack      | Across 3 Availability Zones     |
+| **Protection**      | Rack/Node Failure             | Datacenter/Zone Failure         |
+| **Availability SLA**| Lower                         | Higher                          |
+| **Cost**            | Lower                         | Higher                          |
+| **Use Case**        | General purpose, Cost-sensitive | Higher availability needs within region |
+
+### **3.1.4 Database HA**
+
+Ensuring database services remain available.
+
+*   **Azure SQL Database / Managed Instance:**
+    *   **General Purpose:** Uses remote storage (LRS or optional ZRS). Compute has a stateless replica; failover involves spinning up compute attached to storage. Zone Redundancy option provides replicas across zones.
+    *   **Business Critical / Premium:** Uses Always On Availability Groups with multiple replicas (at least one readable secondary) often deployed across AZs by default in supporting regions for highest HA. Local SSD storage. Fast failover.
+    *   **Hyperscale:** Distributed architecture with redundant page servers, log service, and compute replicas provides inherent HA. Zone Redundancy option available.
+
+*   **Azure Database for PostgreSQL / MySQL / MariaDB (Flexible Server):**
+    *   **Same-Zone HA:** Standby replica in the same AZ with synchronous replication and automatic failover.
+    *   **Zone-Redundant HA:** Standby replica in a different AZ with synchronous replication and automatic failover. Provides higher availability.
+
+*   **Azure Cosmos DB:** Automatically replicates data across multiple replicas within a region (number depends on consistency level, typically 4 replicas). Provides high availability inherently.
+
+### **3.1.5 Networking HA**
+
+Ensuring network path availability.
+
+*   **Azure Load Balancer (Standard SKU):** Zone-redundant by default. Frontend IP and backend pool can span zones. Uses health probes to detect backend instance failures and remove them from rotation.
+*   **Application Gateway (v2 SKU):** Can be deployed zone-redundantly (instances spread across zones). Uses health probes to manage backend health.
+*   **VPN Gateway / ExpressRoute Gateway:**
+    *   **Active-Standby:** Default configuration with two instances, only one active. Failover takes time.
+    *   **Active-Active:** Both instances are active, providing higher throughput and faster failover (requires BGP on-prem).
+    *   **Zone-Redundant Gateways (Specific SKUs):** Deploy gateway instances across Availability Zones for protection against zone failure.
+
+### **3.1.6 Application-Level HA**
+
+Designing applications to be resilient.
+
+*   **Stateless Design:** Design application tiers (e.g., web frontends) to not store client-specific session data locally. If an instance fails, another can handle subsequent requests without data loss.
+*   **External Session State:** Store session state in an external, highly available service like Azure Cache for Redis or a database.
+*   **Health Probes:** Implement health check endpoints in applications that load balancers can use to accurately determine instance health beyond simple connectivity checks.
+*   **Graceful Degradation:** Design applications to handle failures of dependent services gracefully (e.g., show cached data if a backend API is down).
+*   **Retry Logic:** Implement appropriate retry mechanisms with exponential backoff for transient network or service issues.
+
+---
+
+## **3.2 Design for Disaster Recovery (DR)**
+
+Disaster Recovery focuses on restoring services in a different Azure region if the primary region experiences a major outage. It's primarily concerned with meeting RTO and RPO targets.
+
+### **3.2.1 Foundational Concepts**
+
+*   **RTO (Recovery Time Objective):** Maximum acceptable time for service restoration after a disaster declaration. Drives the choice of recovery strategy and infrastructure complexity.
+*   **RPO (Recovery Point Objective):** Maximum acceptable amount of data loss, measured in time (e.g., 1 hour RPO means losing no more than 1 hour of data). Drives the choice of data replication frequency and technology.
+*   **Recovery Strategies:**
+    *   **Backup and Restore:** Lowest cost, highest RTO/RPO. Back up data/VMs to another region and restore when needed.
+    *   **Pilot Light:** Minimal infrastructure (e.g., core services, small VMs) running in the DR region. Data is replicated. During DR, scale out compute resources. Moderate cost, lower RTO/RPO than backup/restore.
+    *   **Warm Standby:** Scaled-down version of the full infrastructure running in the DR region. Data is replicated. Faster RTO than Pilot Light. Higher cost.
+    *   **Hot Standby / Active-Active:** Full-scale infrastructure running in both regions, often handling live traffic (Active-Active) or ready for immediate failover (Active-Passive/Hot Standby). Lowest RTO/RPO, highest cost and complexity.
+
+### **3.2.2 Azure Site Recovery (ASR)**
+
+ASR is Azure's native DR-as-a-Service (DRaaS), primarily focused on replicating virtual machines (and physical servers) to a secondary location for failover.
+
+*   **Scenarios:**
+    *   **Azure-to-Azure VM Replication:** Replicate Azure VMs from one region to another. Simple setup.
+    *   **VMware/Hyper-V/Physical Server to Azure Replication:** Replicate on-premises workloads to Azure for DR. Requires deploying ASR components on-premises (Configuration Server, Process Server, Mobility Service agent).
+
+*   **Components (Azure-to-Azure):**
+    *   **Recovery Services Vault:** Orchestrates replication and failover, stores configuration.
+    *   **Mobility Service Extension:** Automatically installed on Azure VMs being replicated.
+    *   **Cache Storage Account:** Temporarily holds replication data in the source region before sending to the target region.
+
+*   **Features:**
+    *   **Replication Policies:** Define RPO target (ASR provides best-effort RPO, typically minutes), snapshot frequency, retention.
+    *   **Recovery Plans:** Orchestrate failover and failback of multi-tier applications by grouping VMs and defining startup order, scripts, and manual actions.
+    *   **Test Failovers:** Conduct non-disruptive DR drills by failing over VMs to an isolated network in the target region without impacting production replication. Essential for validation.
+    *   **Failover:** Initiate planned or unplanned failover to the secondary region.
+    *   **Failback:** Replicate changes back to the primary region and fail back once it's available (requires reprotection).
+
+**Diagram 3.2.2.A: ASR Azure-to-Azure Replication Flow Visual**
+```mermaid
+graph TD
+    subgraph PrimaryRegion [Primary Region - West US]
+        SourceVM[fa:fa-server Source Azure VM] -- Mobility Service --> CacheStorage[Cache Storage Account];
+        CacheStorage -- Replication Traffic --> TargetRegion[Target Region - East US];
+    end
+
+    subgraph TargetRegion [Target Region - East US]
+        TargetDisks[(fa:fa-database Replicated Managed Disks)];
+        RecoveryPoints{Recovery Points / Snapshots};
+        TargetDisks --> RecoveryPoints;
+    end
+
+    subgraph Management [Management Plane]
+        RSVault[fa:fa-medkit Recovery Services Vault];
+        RSVault -- Orchestrates --> SourceVM;
+        RSVault -- Manages --> TargetDisks;
+        RSVault -- Initiates --> FailoverAction{Failover / Test Failover};
+    end
+
+    FailoverAction -- Creates --> TargetVM[fa:fa-server Target VM from Recovery Point];
+    TargetVM -- Uses --> TargetDisks;
+
+
+    style PrimaryRegion fill:#A9DFBF, stroke:#2ECC71
+    style TargetRegion fill:#AED6F1, stroke:#3498DB
+    style Management fill:#FAD7A0, stroke:#F39C12
+```
+
+**Decision Tree 3.2.2.B: Choosing ASR vs. Azure Backup for VM Recovery**
+```mermaid
+graph TD
+    Start{Need VM Recovery} --> Q_RTO_RPO{What are RTO / RPO Needs?};
+
+    Q_RTO_RPO -- Low RTO/RPO [Minutes/Hours] --> ASR[Consider Azure Site Recovery - Replication];
+    Q_RTO_RPO -- High RTO/RPO [Hours/Days] --> Backup[Consider Azure Backup - Backup/Restore];
+
+    ASR --> Q_Orchestration{Need Application Failover Orchestration?};
+    Backup --> Q_Cost{Primary Driver Cost / Long Term Retention?};
+
+    Q_Orchestration -- Yes --> ASR_Final[Choose ASR - Use Recovery Plans];
+    Q_Orchestration -- No --> ASR_Or_Backup[ASR still viable, compare cost/complexity with Backup];
+
+    Q_Cost -- Yes --> Backup_Final[Choose Azure Backup];
+    Q_Cost -- No --> ASR_Or_Backup;
+
+    ASR_Or_Backup --> End{Select Service & Configure};
+    ASR_Final --> End;
+    Backup_Final --> End;
+
+    style Start fill:#FF9800,color:#FFF
+    style ASR fill:#2ECC71,color:#FFF
+    style Backup fill:#3498DB,color:#FFF
+```
+
+### **3.2.3 Azure Backup**
+
+Azure Backup is Azure's native backup-as-a-service (BaaS) solution for protecting data in Azure and on-premises. Primarily used for operational recovery (e.g., accidental deletion, corruption) and long-term retention, but can also be used for DR via restore to an alternate region.
+
+*   **Components:**
+    *   **Recovery Services Vault:** Stores backup data, manages backup policies, jobs, alerts. Vaults are regional but support Cross-Region Restore.
+    *   **Backup Policies:** Define backup frequency (e.g., daily, weekly) and retention duration for different recovery points (short-term, long-term GFS - Grandfather-Father-Son).
+    *   **Backup Agents/Methods:** Azure VM Backup Extension (for Azure VMs), MARS Agent (for files/folders on-prem/Azure VMs), MABS/DPM (System Center Data Protection Manager or Azure Backup Server for application-aware on-prem backups), Direct backup for Azure Files.
+
+*   **Supported Workloads:** Azure VMs, SQL Server in Azure VM, SAP HANA in Azure VM, Azure Files shares, On-premises Windows Servers (Files/Folders, System State, App-aware via MABS/DPM).
+*   **Features:**
+    *   **Application-consistent backups:** Uses VSS (Windows) or fsfreeze (Linux) for consistent VM/database backups.
+    *   **Granular Restore:** Item-Level Restore (ILR) for files/folders from VM backups without restoring the entire VM disk. Database-level restore for SQL/SAP HANA.
+    *   **Cross-Region Restore (CRR):** Enable secondary region replication for backup data stored in a GRS vault. Allows restoring backups directly to the secondary region for DR scenarios. RTO is higher as it involves a restore operation.
+    *   **Soft Delete:** Retains deleted backup data for 14 days (extendable) to protect against accidental or malicious deletion of backups.
+    *   **Backup Center:** Centralized management interface for Azure Backup across multiple vaults/subscriptions.
+
+**Diagram 3.2.3.A: Azure Backup Architecture Azure VM Visual**
+```mermaid
+graph TD
+    subgraph PrimaryRegion [Primary Region - West US]
+        SourceVM[fa:fa-server Azure VM] -- Backup Extension --> Snapshot{Disk Snapshot};
+        Snapshot -- Data Transfer --> PrimaryVault[(fa:fa-database Recovery Services Vault - GRS)];
+    end
+
+    subgraph SecondaryRegion [Secondary Region - East US]
+        SecondaryVaultData[(fa:fa-database Replicated Backup Data)];
+    end
+
+    PrimaryVault -- CRR Replication [Optional] --> SecondaryVaultData;
+
+    RestorePrimary{Restore VM / Disks / Files in Primary Region} <-- PrimaryVault;
+    RestoreSecondary{Restore VM / Disks / Files in Secondary Region} <-- SecondaryVaultData; %% If CRR Enabled
+
+    style PrimaryRegion fill:#A9DFBF, stroke:#2ECC71
+    style SecondaryRegion fill:#AED6F1, stroke:#3498DB
+    style PrimaryVault fill:#FAD7A0, stroke:#F39C12
+```
+
+### **3.2.4 Storage DR**
+
+Leveraging storage account redundancy for DR.
+
+*   **Storage Accounts:**
+    *   **GRS (Geo-Redundant Storage):** Asynchronous replication to a secondary region. Protects against regional outage. Failover is Microsoft-initiated during major regional disasters. Data might lag behind primary (RPO depends on replication lag).
+    *   **RA-GRS (Read-Access Geo-Redundant Storage):** Same as GRS, but allows read-only access to the secondary endpoint. Useful for verifying replication or offloading read traffic, but failover is still Microsoft-initiated.
+    *   **GZRS / RA-GZRS:** Combines ZRS in primary with GRS/RA-GRS, providing highest durability against both zone and regional failures.
+    *   **Account Failover (Customer-Managed):** For GRS/GZRS/RA-GRS/RA-GZRS accounts, customers can initiate an account failover to the secondary region. This promotes the secondary region to become the new primary (read-write). This is a permanent change until failed back. Use with caution, understand RPO implications due to async replication lag.
+
+**Comparison Table 3.2.4.A: Storage Redundancy for DR Comparison [GRS vs RA-GRS vs GZRS vs RA-GZRS]**
+
+| Feature             | GRS                     | RA-GRS                  | GZRS                    | RA-GZRS                 |
+| :------------------ | :---------------------- | :---------------------- | :---------------------- | :---------------------- |
+| **Primary Region**  | LRS                     | LRS                     | ZRS                     | ZRS                     |
+| **Secondary Region**| LRS                     | LRS                     | LRS                     | LRS                     |
+| **Replication**     | Async                   | Async                   | Async                   | Async                   |
+| **Read Access Sec?**| No                      | Yes                     | No                      | Yes                     |
+| **Failover Type**   | Microsoft-initiated / Customer-initiated | Microsoft-initiated / Customer-initiated | Microsoft-initiated / Customer-initiated | Microsoft-initiated / Customer-initiated |
+| **Protection**      | Regional Failure        | Regional Failure        | Zone + Regional Failure | Zone + Regional Failure |
+| **Durability**      | High [16 nines]         | High [16 nines]         | Highest [16 nines]      | Highest [16 nines]      |
+| **Cost**            | Moderate                | Higher than GRS         | Higher than GRS         | Highest                 |
+
+### **3.2.5 Database DR**
+
+Implementing DR strategies for managed databases.
+
+*   **Azure SQL Database / Managed Instance:**
+    *   **Failover Groups:** Recommended approach. Builds on Active Geo-Replication. Provides listener endpoints that automatically route traffic to the current primary region after failover (automatic or manual). Simplifies application configuration. RPO typically seconds, RTO typically under 1 minute (auto-failover) or longer (manual).
+    *   **Active Geo-Replication:** Create up to 4 readable secondaries in different regions. Requires manual failover process (update connection strings or use DNS).
+
+*   **Azure Database for PostgreSQL / MySQL / MariaDB:**
+    *   **Cross-Region Read Replicas:** Create read replicas in a different region using asynchronous replication. For DR, you manually stop replication and promote the read replica to become a standalone writeable server, then update application connections. RPO depends on replication lag, RTO is manual and longer.
+
+*   **Azure Cosmos DB:**
+    *   **Global Distribution:** Natively supports replicating data across multiple regions. Configure regions as read and/or write replicas.
+    *   **Failover Policies:** Configure automatic failover priority for regions. If the primary write region fails, Cosmos DB can automatically promote the next region in the priority list. RPO is near-zero for Strong consistency (with trade-offs), higher for relaxed levels. RTO can be seconds/minutes for automatic failover.
+
+### **3.2.6 Networking DR [Global Load Balancing]**
+
+Directing user traffic to the appropriate (healthy) region.
+
+*   **Azure Traffic Manager:** DNS-based traffic load balancing service. Routes client requests to different endpoints (Azure VMs, Web Apps, external endpoints) based on chosen routing method and endpoint health probes.
+    *   **Routing Methods:**
+        *   **Priority:** Primary/Backup site configuration. All traffic to primary; failover to backup if primary is unhealthy.
+        *   **Weighted:** Distribute traffic across endpoints based on assigned weights (e.g., 70% to Region A, 30% to Region B).
+        *   **Performance:** Direct users to the "closest" endpoint in terms of lowest network latency. Uses internet latency measurements.
+        *   **Geographic:** Direct users based on the geographic location of their DNS query source (e.g., users from Europe go to West Europe endpoint).
+        *   **Multivalue:** Return multiple healthy endpoint IPs (for IPv4/IPv6). Client-side retry.
+        *   **Subnet:** Direct users based on their source IP address range.
+    *   **Health Probes:** Monitors endpoint health (HTTP, HTTPS, TCP). If an endpoint fails probes, Traffic Manager stops routing traffic to it (based on DNS TTL). Failover time depends on DNS propagation.
+
+*   **Azure Front Door:** Modern cloud CDN and global L7 load balancer using Microsoft's global edge network (Anycast). Provides application acceleration, security (WAF), and high availability.
+    *   **Features:** L7 HTTP/S routing (Path-based, Host-based), SSL Offloading, Session Affinity, URL Rewrite, Caching, Web Application Firewall (WAF), DDoS protection.
+    *   **Routing:** Uses health probes to detect backend failures and routes traffic to healthy backends in primary or secondary regions based on configured origin groups, priorities, and weights. Failover is typically faster than Traffic Manager due to Anycast nature.
+    *   **Tiers:** Standard (Content Delivery + Load Balancing) and Premium (Adds WAF, Private Link support, enhanced security).
+
+**Comparison Table 3.2.6.A: Traffic Manager vs. Front Door Comparison**
+
+| Feature             | Azure Traffic Manager                 | Azure Front Door                      |
+| :------------------ | :------------------------------------ | :------------------------------------ |
+| **Layer**           | DNS [Layer 7 conceptually via DNS]    | Layer 7 [HTTP/S Proxy]                |
+| **Routing Basis**   | DNS Response                          | HTTP/S Request Routing                |
+| **Protocol**        | Any [Endpoint health via HTTP/TCP]    | HTTP, HTTPS                           |
+| **Failover**        | DNS based [TTL dependent]             | Faster [Anycast based]                |
+| **WAF**             | No [Can integrate with App Gateway WAF]| Yes [Integrated WAF]                  |
+| **SSL Offload**     | No                                    | Yes                                   |
+| **Caching**         | No                                    | Yes                                   |
+| **Session Affinity**| No                                    | Yes [Cookie-based]                    |
+| **Network**         | Public DNS System                     | Microsoft Global Edge Network [Anycast]|
+| **Use Case**        | Global DNS Load Balancing, Non-HTTP   | Global HTTP/S Apps, Acceleration, WAF |
+
+**Decision Tree 3.2.6.B: Choosing a Global Load Balancer**
+```mermaid
+graph TD
+    Start{Need Global Traffic Routing} --> Q_Protocol{HTTP/S Traffic Only?};
+
+    Q_Protocol -- Yes --> Q_Features{Need WAF, SSL Offload, Caching, Path Routing?};
+    Q_Protocol -- No / Any Protocol --> TM[Choose Traffic Manager];
+
+    Q_Features -- Yes --> AFD[Choose Azure Front Door];
+    Q_Features -- No --> Q_FailoverSpeed{Is Fastest Possible Failover Critical?};
+
+    Q_FailoverSpeed -- Yes --> AFD_Maybe[Consider Front Door - Faster Failover];
+    Q_FailoverSpeed -- No --> TM_Maybe[Consider Traffic Manager - Simpler/Cheaper if no L7 features needed];
+
+    TM --> End{Select Service & Configure};
+    AFD --> End;
+    AFD_Maybe --> End;
+    TM_Maybe --> End;
+
+    style Start fill:#FF9800,color:#FFF
+    style TM fill:#3498DB,color:#FFF
+    style AFD fill:#2ECC71,color:#FFF
+```
+
+### **3.2.7 Overall DR Strategy Selection**
+
+Choosing the right DR strategy involves balancing RTO, RPO, cost, complexity, and application architecture.
+
+**Decision Tree 3.2.7.A: Choosing a DR Strategy**
+```mermaid
+graph TD
+    Start{Define DR Requirements} --> Q_RTO{What is the Target RTO?};
+
+    Q_RTO -- RTO_High [Hours to Days] --> Q_RPO_High{Target RPO?};
+    Q_RTO -- RTO_Med [Minutes to Hours] --> Q_RPO_Med{Target RPO?};
+    Q_RTO -- RTO_Low [Seconds to Minutes] --> Q_RPO_Low{Target RPO?};
+
+    Q_RPO_High -- RPO_High [Hours] --> BackupRestore[Strategy: Backup/Restore - Lowest Cost];
+    Q_RPO_High -- RPO_Med [Minutes] --> PilotLight_Maybe[Consider Pilot Light / Warm Standby with Frequent Backups/Replication];
+
+    Q_RPO_Med -- RPO_Med [Minutes] --> PilotWarm[Strategy: Pilot Light or Warm Standby - Use ASR / DB Replication];
+    Q_RPO_Med -- RPO_Low [Seconds] --> HotStandby_Maybe[Consider Hot Standby / Active-Active with DB Failover Groups / Cosmos Global DB];
+
+    Q_RPO_Low -- RPO_Low [Seconds / Near Zero] --> ActiveActive[Strategy: Hot Standby / Active-Active - Requires App Architecture Support];
+
+    BackupRestore --> End{Implement Strategy};
+    PilotLight_Maybe --> End;
+    PilotWarm --> End;
+    HotStandby_Maybe --> End;
+    ActiveActive --> End;
+
+    Note1["Cost & Complexity Increase: Backup/Restore < Pilot Light < Warm Standby < Hot Standby < Active-Active"]
+
+    style Start fill:#FF9800,color:#FFF
+    style BackupRestore fill:#AED6F1,color:#000
+    style PilotWarm fill:#A9DFBF,color:#000
+    style ActiveActive fill:#FAD7A0,color:#000
+```
+
+---
+**(End of Section 3)**
